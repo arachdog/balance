@@ -1,0 +1,960 @@
+<title>Balance Haptics</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600&family=Atkinson+Hyperlegible:wght@400;700&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap">
+<meta name="theme-color" content="#0F1513">
+<style>
+/* Layout: one-column phone instrument. Sticky status bar, live head view, tabbed settings, bottom tab bar. */
+:root {
+  --ground: #EEF2F0;
+  --surface: #FFFFFF;
+  --ink: #16201D;
+  --muted: #5A6A65;
+  --line: #D3DCD8;
+  --signal: #0E7466;        /* controls, links, selection */
+  --signal-ink: #FFFFFF;
+  --buzz: #D9822B;          /* motor activity only */
+  --buzz-soft: #F6E2CB;
+  --warn: #B4471F;
+  --ok: #2E7D4F;
+  --head: #E3E9E6;
+  --font-display: "Archivo Narrow", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-data: "Atkinson Hyperlegible Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0F1513; --surface: #18201E; --ink: #E5ECE9; --muted: #95A49F; --line: #2B3633;
+    --signal: #4CC2AF; --signal-ink: #06231E; --buzz: #F2A54A; --buzz-soft: #3A2A16;
+    --warn: #F08A5D; --ok: #6CCB92; --head: #222C29; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0F1513; --surface: #18201E; --ink: #E5ECE9; --muted: #95A49F; --line: #2B3633;
+  --signal: #4CC2AF; --signal-ink: #06231E; --buzz: #F2A54A; --buzz-soft: #3A2A16;
+  --warn: #F08A5D; --ok: #6CCB92; --head: #222C29; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  background: var(--ground); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.45; margin: 0;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; border-radius: 6px; }
+
+.app { max-width: 560px; margin: 0 auto; padding-inline: 16px; padding-block: 0 96px; display: flex; flex-direction: column; gap: 16px; }
+
+/* status bar */
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--ground); padding-block: 12px 8px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-family: var(--font-display); font-weight: 600; font-size: 20px; letter-spacing: 0.01em; margin-right: auto; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); font-size: 13px; white-space: nowrap;
+}
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill.live .dot { background: var(--ok); }
+.pill.demo .dot { background: var(--buzz); }
+.pill.warn { border-color: var(--warn); color: var(--warn); }
+.pill.warn .dot { background: var(--warn); }
+
+.btn {
+  min-height: 44px; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface); cursor: pointer; font-weight: 700;
+}
+.btn.primary { background: var(--signal); border-color: var(--signal); color: var(--signal-ink); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.small { min-height: 36px; padding: 4px 12px; font-size: 14px; }
+
+/* connect banner */
+.banner {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.banner p { margin: 0; color: var(--muted); max-width: 60ch; }
+.banner .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.msg { font-size: 14px; color: var(--warn); margin: 0; }
+
+/* live view */
+.live { display: flex; flex-direction: column; gap: 12px; }
+.stage { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 8px; }
+.stage svg { display: block; width: 100%; height: auto; max-width: 100%; touch-action: none; user-select: none; }
+.stage .hint { position: absolute; left: 14px; bottom: 10px; font-size: 13px; color: var(--muted); margin: 0; }
+.stage .state { position: absolute; right: 14px; top: 12px; font-size: 13px; color: var(--muted); }
+.readouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.readout { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.readout .k { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.readout .v { font-family: var(--font-data); font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#rDir { font-family: var(--font-body); font-size: 16px; font-weight: 700; white-space: normal; line-height: 1.15; text-transform: capitalize; }
+.readout .v small { font-size: 13px; color: var(--muted); }
+.turn-row { display: flex; gap: 10px; }
+.turn-row .btn { flex: 1; }
+@media (max-width: 380px) { .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* sections */
+.panel { display: flex; flex-direction: column; gap: 12px; }
+.panel > h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 4px 0 0; text-wrap: balance; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.card-head { display: flex; align-items: center; gap: 12px; }
+.card-head h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 0; margin-right: auto; }
+.card p.note { margin: 0; color: var(--muted); font-size: 14px; max-width: 62ch; }
+.card.off .body { opacity: 0.45; }
+.body { display: flex; flex-direction: column; gap: 12px; }
+
+.field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+.field label { font-size: 15px; }
+.field .val { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 15px; color: var(--muted); text-align: right; min-width: 5.5ch; }
+.field input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--signal); height: 28px; }
+.field select, .field input[type=number] {
+  min-height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); padding: 4px 8px;
+}
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; min-height: 38px; padding: 4px 12px; cursor: pointer; font-size: 14px; }
+.seg button[aria-pressed="true"] { background: var(--signal); color: var(--signal-ink); font-weight: 700; }
+
+.switch { position: relative; width: 52px; height: 30px; flex: none; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .15s; pointer-events: none; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .15s; }
+.switch input:checked + span { background: var(--signal); }
+.switch input:checked + span::after { transform: translateX(22px); }
+.switch input:focus-visible + span { outline: 3px solid var(--signal); outline-offset: 2px; }
+
+.motor-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding-block: 8px; border-top: 1px solid var(--line); }
+.motor-row:first-of-type { border-top: 0; }
+.motor-row .tag { font-family: var(--font-data); font-weight: 500; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--buzz-soft); color: var(--ink); }
+.motor-row select { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); padding: 4px 8px; width: 100%; }
+.motor-row .trim { grid-column: 2 / -1; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); }
+.motor-row .trim input { width: 100%; accent-color: var(--signal); }
+
+textarea { width: 100%; min-height: 120px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); padding: 8px; font-family: var(--font-data); font-size: 12px; }
+dl.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 14px; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; font-family: var(--font-data); overflow-wrap: anywhere; }
+
+/* bottom tabs */
+.tabs {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.tabs .inner { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); }
+.tabs button { border: 0; background: transparent; min-height: 56px; cursor: pointer; font-family: var(--font-display); font-size: 15px; letter-spacing: 0.04em; color: var(--muted); }
+.tabs button[aria-selected="true"] { color: var(--signal); font-weight: 600; box-shadow: inset 0 3px 0 var(--signal); }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: var(--ink); color: var(--ground); padding: 10px 16px; border-radius: 10px; font-size: 15px; z-index: 9; max-width: calc(100% - 32px);
+}
+.live.compact .stage svg { max-height: 210px; }
+.live.compact .turn-row { display: none; }
+@keyframes ring { from { opacity: .9; r: var(--r0); } to { opacity: 0; r: var(--r1); } }
+.pulse { animation: ring 0.9s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; opacity: 0; } }
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="brand">Balance Haptics</div>
+    <span class="pill demo" id="connPill"><span class="dot"></span><span id="connText">Demo</span></span>
+    <span class="pill" id="battPill" hidden><span class="dot"></span><span id="battText"></span></span>
+    <button class="btn small primary" id="saveBtn" disabled>Saved</button>
+  </header>
+
+  <section class="banner" id="connectBanner">
+    <p id="connectNote">Plug the board into your phone with a USB-C OTG cable, then connect. Until then you are in demo mode: drag the head to lean it and feel out the settings.</p>
+    <div class="row">
+      <button class="btn primary" id="connectBtn">Connect board</button>
+    </div>
+    <p class="msg" id="connectMsg" hidden></p>
+  </section>
+
+  <section class="live" id="liveView" aria-label="Live view">
+    <div class="stage">
+      <svg id="head" viewBox="0 0 300 300" role="img" aria-label="Top view of the head with motor positions and current lean">
+        <path d="M140 62 L150 48 L160 62 Z" fill="var(--head)" stroke="var(--line)"></path>
+        <circle id="headShape" cx="150" cy="150" r="92" fill="var(--head)" stroke="var(--line)"></circle>
+        <circle id="ringDead" cx="150" cy="150" r="10" fill="none" stroke="var(--muted)" stroke-dasharray="2 3"></circle>
+        <circle id="ringScale" cx="150" cy="150" r="72" fill="none" stroke="var(--muted)" stroke-opacity=".35"></circle>
+        <path id="yawArc" d="" fill="none" stroke="var(--signal)" stroke-width="6" stroke-linecap="round"></path>
+        <path id="tickArc" d="" fill="none" stroke="var(--muted)" stroke-width="3" stroke-linecap="round"></path>
+        <line id="accArrow" x1="150" y1="150" x2="150" y2="150" stroke="var(--signal)" stroke-width="4" stroke-linecap="round"></line>
+        <line x1="150" y1="142" x2="150" y2="158" stroke="var(--muted)"></line>
+        <line x1="142" y1="150" x2="158" y2="150" stroke="var(--muted)"></line>
+        <circle id="leanDot" cx="150" cy="150" r="9" fill="var(--ink)"></circle>
+        <g id="motorNodes"></g>
+        <text x="150" y="80" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--font-display)" letter-spacing="1">FRONT</text>
+      </svg>
+      <span class="state" id="stateText">Demo</span>
+      <p class="hint" id="dragHint">Drag to lean</p>
+    </div>
+    <div class="readouts">
+      <div class="readout"><div class="k">Tilt</div><div class="v" id="rTilt">0.0<small>°</small></div></div>
+      <div class="readout"><div class="k">Toward</div><div class="v" id="rDir">—</div></div>
+      <div class="readout"><div class="k">Accel</div><div class="v" id="rAcc">0.00<small> g</small></div></div>
+      <div class="readout"><div class="k">Turn</div><div class="v" id="rYaw">0<small>°/s</small></div></div>
+    </div>
+    <div class="turn-row" id="demoTurn">
+      <button class="btn" id="turnLeft">Hold to turn left</button>
+      <button class="btn" id="turnRight">Hold to turn right</button>
+    </div>
+  </section>
+
+  <!-- CUES -->
+  <section class="panel" id="tab-cues" role="tabpanel" aria-labelledby="t-cues">
+    <h2>Cues</h2>
+
+    <div class="card" id="card-tilt">
+      <div class="card-head"><h3>Tilt</h3>
+        <label class="switch" aria-label="Tilt cue on"><input type="checkbox" id="tilt-enabled"><span></span></label></div>
+      <div class="body">
+        <p class="note">Buzzes when your head leans away from your neutral posture.</p>
+        <div class="field"><label for="tilt-dead">Starts at</label><span class="val" id="tilt-dead-v"></span><input type="range" id="tilt-dead" min="0" max="30" step="0.5"></div>
+        <div class="field"><label for="tilt-full">Full strength at</label><span class="val" id="tilt-full-v"></span><input type="range" id="tilt-full" min="1" max="60" step="0.5"></div>
+        <div class="field"><label for="tilt-gain">Strength</label><span class="val" id="tilt-gain-v"></span><input type="range" id="tilt-gain" min="0" max="100" step="1"></div>
+        <div class="field"><label>Feel</label><div class="seg" id="tilt-pattern"></div></div>
+        <div class="field" id="tilt-hz-row"><label for="tilt-hz">Pulse rate</label><span class="val" id="tilt-hz-v"></span><input type="range" id="tilt-hz" min="1" max="30" step="1"></div>
+        <div class="field" id="tilt-hzmax-row"><label for="tilt-hzmax">Pulse rate at full</label><span class="val" id="tilt-hzmax-v"></span><input type="range" id="tilt-hzmax" min="1" max="40" step="1"></div>
+        <div class="field"><label>Response</label><div class="seg" id="tilt-curve"></div></div>
+        <div class="field"><label>Buzz on</label><div class="seg" id="tilt-pol"></div></div>
+      </div>
+    </div>
+
+    <div class="card" id="card-accel">
+      <div class="card-head"><h3>Acceleration</h3>
+        <label class="switch" aria-label="Acceleration cue on"><input type="checkbox" id="accel-enabled"><span></span></label></div>
+      <div class="body">
+        <p class="note">Buzzes in the direction you are being pushed or are speeding up, with gravity removed.</p>
+        <div class="field"><label for="accel-dead">Starts at</label><span class="val" id="accel-dead-v"></span><input type="range" id="accel-dead" min="0" max="0.5" step="0.01"></div>
+        <div class="field"><label for="accel-full">Full strength at</label><span class="val" id="accel-full-v"></span><input type="range" id="accel-full" min="0.05" max="2" step="0.01"></div>
+        <div class="field"><label for="accel-gain">Strength</label><span class="val" id="accel-gain-v"></span><input type="range" id="accel-gain" min="0" max="100" step="1"></div>
+        <div class="field"><label>Feel</label><div class="seg" id="accel-pattern"></div></div>
+        <div class="field" id="accel-hz-row"><label for="accel-hz">Pulse rate</label><span class="val" id="accel-hz-v"></span><input type="range" id="accel-hz" min="1" max="30" step="1"></div>
+        <div class="field" id="accel-hzmax-row"><label for="accel-hzmax">Pulse rate at full</label><span class="val" id="accel-hzmax-v"></span><input type="range" id="accel-hzmax" min="1" max="40" step="1"></div>
+        <div class="field"><label>Response</label><div class="seg" id="accel-curve"></div></div>
+        <div class="field"><label>Buzz on</label><div class="seg" id="accel-pol"></div></div>
+        <div class="field"><label for="accel-lpf">Smoothing</label><span class="val" id="accel-lpf-v"></span><input type="range" id="accel-lpf" min="1" max="30" step="1"></div>
+        <div class="card-head"><span style="margin-right:auto">Up and down movement buzzes all motors</span>
+          <label class="switch" aria-label="Vertical acceleration"><input type="checkbox" id="accel-vert"><span></span></label></div>
+      </div>
+    </div>
+
+    <div class="card" id="card-yaw">
+      <div class="card-head"><h3>Turning speed</h3>
+        <label class="switch" aria-label="Turning speed cue on"><input type="checkbox" id="yaw-enabled"><span></span></label></div>
+      <div class="body">
+        <p class="note">Buzzes on the right side while you turn right, left side while you turn left.</p>
+        <div class="field"><label for="yaw-dead">Starts at</label><span class="val" id="yaw-dead-v"></span><input type="range" id="yaw-dead" min="0" max="120" step="1"></div>
+        <div class="field"><label for="yaw-full">Full strength at</label><span class="val" id="yaw-full-v"></span><input type="range" id="yaw-full" min="10" max="500" step="5"></div>
+        <div class="field"><label for="yaw-gain">Strength</label><span class="val" id="yaw-gain-v"></span><input type="range" id="yaw-gain" min="0" max="100" step="1"></div>
+        <div class="field"><label>Feel</label><div class="seg" id="yaw-pattern"></div></div>
+        <div class="field" id="yaw-hz-row"><label for="yaw-hz">Pulse rate</label><span class="val" id="yaw-hz-v"></span><input type="range" id="yaw-hz" min="1" max="30" step="1"></div>
+        <div class="field" id="yaw-hzmax-row"><label for="yaw-hzmax">Pulse rate at full</label><span class="val" id="yaw-hzmax-v"></span><input type="range" id="yaw-hzmax" min="1" max="40" step="1"></div>
+        <div class="field"><label>Response</label><div class="seg" id="yaw-curve"></div></div>
+      </div>
+    </div>
+
+    <div class="card" id="card-tick">
+      <div class="card-head"><h3>Turn ticks</h3>
+        <label class="switch" aria-label="Turn ticks on"><input type="checkbox" id="tick-enabled"><span></span></label></div>
+      <div class="body">
+        <p class="note">A short tap on the side you are turning toward, once for every set number of degrees turned.</p>
+        <div class="field"><label for="tick-step">Tick every</label><span class="val" id="tick-step-v"></span><input type="range" id="tick-step" min="5" max="180" step="5"></div>
+        <div class="field"><label for="tick-ms">Tap length</label><span class="val" id="tick-ms-v"></span><input type="range" id="tick-ms" min="20" max="250" step="10"></div>
+        <div class="field"><label for="tick-gain">Tap strength</label><span class="val" id="tick-gain-v"></span><input type="range" id="tick-gain" min="0" max="100" step="1"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SETUP -->
+  <section class="panel" id="tab-setup" role="tabpanel" aria-labelledby="t-setup" hidden>
+    <h2>Setup</h2>
+
+    <div class="card">
+      <div class="card-head"><h3>Neutral posture</h3></div>
+      <p class="note">Sit or stand upright and look straight ahead, then tap the button. Tilt is measured from this posture.</p>
+      <div class="row" style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn primary" id="setNeutralBtn">Set neutral now</button>
+      </div>
+      <div class="field"><label for="neutralMode">Neutral comes from</label>
+        <select id="neutralMode"><option value="0">The saved posture</option><option value="1">Each power-on</option></select></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Motor positions</h3></div>
+      <p class="note">Tap Buzz to find each motor, then set where it sits on the head.</p>
+      <div id="motorRows"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Board mounting</h3></div>
+      <div class="field"><label for="fwdAxis">Board edge facing forward</label>
+        <select id="fwdAxis">
+          <option value="0">Front edge (X+)</option>
+          <option value="1">Back edge (X−)</option>
+          <option value="2">Left edge (Y+)</option>
+          <option value="3">Right edge (Y−)</option>
+          <option value="4">Top face (Z+)</option>
+          <option value="5">Bottom face (Z−)</option>
+        </select></div>
+      <div class="card-head"><span style="margin-right:auto">Swap left and right</span>
+        <label class="switch" aria-label="Swap left and right"><input type="checkbox" id="mirror"><span></span></label></div>
+      <p class="note">Check on the live view: lean right and the dot should move right. If it moves left, turn on Swap.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Motor drive</h3></div>
+      <div class="field"><label for="masterGain">Overall strength</label><span class="val" id="masterGain-v"></span><input type="range" id="masterGain" min="0" max="100" step="1"></div>
+      <div class="field"><label for="minDuty">Lowest power that still buzzes</label><span class="val" id="minDuty-v"></span><input type="range" id="minDuty" min="0" max="80" step="1"></div>
+      <div class="field"><label for="maxDuty">Power at full strength</label><span class="val" id="maxDuty-v"></span><input type="range" id="maxDuty" min="10" max="100" step="1"></div>
+      <p class="note">Raise the lowest power until the weakest cue is just felt. Buzz a motor at low strength to check.</p>
+    </div>
+  </section>
+
+  <!-- DEVICE -->
+  <section class="panel" id="tab-device" role="tabpanel" aria-labelledby="t-device" hidden>
+    <h2>Device</h2>
+    <div class="card">
+      <div class="card-head"><span style="margin-right:auto">Feedback on</span>
+        <label class="switch" aria-label="Feedback on"><input type="checkbox" id="enabled"><span></span></label></div>
+      <div class="field"><label>When cues overlap</label><div class="seg" id="combine"></div></div>
+      <div class="field"><label for="focus">Direction focus</label><span class="val" id="focus-v"></span><input type="range" id="focus" min="1" max="6" step="0.1"></div>
+      <p class="note">Higher focus keeps a cue on the nearest motor. Lower focus blends it across neighbouring motors.</p>
+      <div class="card-head"><span style="margin-right:auto">Buzz once when ready</span>
+        <label class="switch" aria-label="Start-up buzz"><input type="checkbox" id="startupBuzz"><span></span></label></div>
+      <div class="card-head"><span style="margin-right:auto">Low battery: three buzzes every 20 s</span>
+        <label class="switch" aria-label="Low battery alert"><input type="checkbox" id="batteryAlert"><span></span></label></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Accelerometer calibration</h3></div>
+      <p class="note">Place the board flat on a table, still, then calibrate. Do this once, before setting your neutral posture.</p>
+      <div><button class="btn" id="accCalBtn">Calibrate accelerometer</button></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Settings backup</h3></div>
+      <p class="note">Copy the settings as text to keep them, or paste saved text and load it.</p>
+      <textarea id="backup" aria-label="Settings as text" spellcheck="false"></textarea>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" id="copyBtn">Copy settings</button>
+        <button class="btn" id="loadBtn">Load from text</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Board</h3></div>
+      <dl class="kv" id="boardInfo"><dt>Status</dt><dd>Demo mode</dd></dl>
+      <div><button class="btn" id="disconnectBtn" hidden>Disconnect</button></div>
+    </div>
+  </section>
+</div>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <div class="inner">
+    <button role="tab" id="t-live" aria-selected="true" data-tab="live">Live</button>
+    <button role="tab" id="t-cues" aria-selected="false" data-tab="cues">Cues</button>
+    <button role="tab" id="t-setup" aria-selected="false" data-tab="setup">Setup</button>
+    <button role="tab" id="t-device" aria-selected="false" data-tab="device">Device</button>
+  </div>
+</nav>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+"use strict";
+// ======================================================================
+// Protocol (must match haptic.c in the firmware)
+// ======================================================================
+const MSP = {
+  HAPTIC_INFO: 0x3100, HAPTIC_STATUS: 0x3101, HAPTIC_CONFIG: 0x3102,
+  HAPTIC_SET_CONFIG: 0x3103, HAPTIC_SET_NEUTRAL: 0x3104, HAPTIC_TEST: 0x3105,
+  ACC_CALIBRATION: 205, EEPROM_WRITE: 250, API_VERSION: 1, FC_VERSION: 3, BOARD_INFO: 4,
+};
+const CH = [["enabled","u8"],["pattern","u8"],["gain","u8"],["curve","u8"],["deadband","u16"],["fullScale","u16"],["pulseHz","u8"],["pulseHzMax","u8"]];
+const FIELDS = [
+  ["enabled","u8"],["neutralMode","u8"],["forwardAxis","u8"],["mirror","u8"],
+  ["neutralUp0","i16"],["neutralUp1","i16"],["neutralUp2","i16"],
+  ["az0","i16"],["az1","i16"],["az2","i16"],["az3","i16"],
+  ["gain0","u8"],["gain1","u8"],["gain2","u8"],["gain3","u8"],
+  ["minDuty","u8"],["maxDuty","u8"],["masterGain","u8"],["combine","u8"],["focus","u8"],
+  ["tiltPolarity","u8"],["accelPolarity","u8"],["accelVertical","u8"],
+  ...CH.map(([n,t]) => ["tilt."+n, t]), ...CH.map(([n,t]) => ["accel."+n, t]), ...CH.map(([n,t]) => ["yawRate."+n, t]),
+  ["accelLpfHz","u8"],["yawTickEnabled","u8"],["yawTickStep","u16"],["yawTickMs","u8"],["yawTickGain","u8"],["flags","u8"],
+];
+const SIZES = { u8: 1, u16: 2, i16: 2 };
+const CONFIG_BYTES = FIELDS.reduce((n, [, t]) => n + SIZES[t], 0);   // 67
+
+function decodeConfig(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const c = {}; let o = 0;
+  for (const [n, t] of FIELDS) {
+    c[n] = t === "u8" ? dv.getUint8(o) : t === "u16" ? dv.getUint16(o, true) : dv.getInt16(o, true);
+    o += SIZES[t];
+  }
+  return c;
+}
+function encodeConfig(c) {
+  const b = new Uint8Array(CONFIG_BYTES), dv = new DataView(b.buffer); let o = 0;
+  for (const [n, t] of FIELDS) {
+    const v = Math.round(Number(c[n]) || 0);
+    if (t === "u8") dv.setUint8(o, Math.max(0, Math.min(255, v)));
+    else if (t === "u16") dv.setUint16(o, Math.max(0, Math.min(65535, v)), true);
+    else dv.setInt16(o, Math.max(-32768, Math.min(32767, v)), true);
+    o += SIZES[t];
+  }
+  return b;
+}
+function decodeStatus(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const i = (k) => dv.getInt16(1 + 2 * k, true);
+  const f = dv.getUint8(0);
+  return {
+    ready: !!(f & 1), acc: !!(f & 2), test: !!(f & 4), batteryLow: !!(f & 8), enabled: !!(f & 16),
+    tilt: i(0) / 10, leanAz: i(1), leanF: i(2) / 1000, leanR: i(3) / 1000,
+    accH: i(4) / 1000, accAz: i(5), accV: i(6) / 1000, yawRate: i(7) / 10, yawSinceTick: i(8) / 10,
+    motors: [dv.getUint8(25), dv.getUint8(26), dv.getUint8(27), dv.getUint8(28)],
+    vbat: b.byteLength >= 31 ? dv.getUint16(29, true) / 100 : 0,
+  };
+}
+
+function defaultConfig() {   // same as pgResetFn_hapticConfig
+  const ch = (en, pat, gain, dead, full, hz, hzMax) => ({ enabled: en, pattern: pat, gain, curve: 10, deadband: dead, fullScale: full, pulseHz: hz, pulseHzMax: hzMax });
+  const c = { enabled: 1, neutralMode: 0, forwardAxis: 0, mirror: 0, neutralUp0: 0, neutralUp1: 0, neutralUp2: 10000,
+    az0: 0, az1: 90, az2: 180, az3: 270, gain0: 100, gain1: 100, gain2: 100, gain3: 100,
+    minDuty: 20, maxDuty: 100, masterGain: 80, combine: 0, focus: 10, tiltPolarity: 0, accelPolarity: 0, accelVertical: 0,
+    accelLpfHz: 5, yawTickEnabled: 1, yawTickStep: 300, yawTickMs: 60, yawTickGain: 100, flags: 3 };
+  const put = (p, o) => { for (const k in o) c[p + "." + k] = o[k]; };
+  put("tilt", ch(1, 0, 100, 20, 200, 4, 12));
+  put("accel", ch(1, 1, 80, 50, 500, 8, 20));
+  put("yawRate", ch(0, 2, 70, 20, 200, 3, 15));
+  return c;
+}
+
+// ======================================================================
+// USB transports: WebUSB (Android Chrome) and Web Serial (desktop Chrome/Edge)
+// ======================================================================
+async function openWebUsb(onData, onClose) {
+  const dev = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x0483 }, { classCode: 0x02 }] });
+  await dev.open();
+  if (!dev.configuration) await dev.selectConfiguration(1);
+  let comm, data, epIn, epOut;
+  for (const itf of dev.configuration.interfaces) {
+    const alt = itf.alternates[0];
+    if (alt.interfaceClass === 0x02) comm = itf.interfaceNumber;
+    if (alt.interfaceClass === 0x0A) {
+      data = itf.interfaceNumber;
+      for (const ep of alt.endpoints) if (ep.type === "bulk") { if (ep.direction === "in") epIn = ep.endpointNumber; else epOut = ep.endpointNumber; }
+    }
+  }
+  if (data === undefined || epIn === undefined || epOut === undefined) throw new Error("This USB device is not a serial port.");
+  if (comm !== undefined) { try { await dev.claimInterface(comm); } catch (e) { /* control still works on most phones */ } }
+  await dev.claimInterface(data);
+  const idx = comm ?? 0;
+  try { await dev.controlTransferOut({ requestType: "class", recipient: "interface", request: 0x20, value: 0, index: idx }, new Uint8Array([0x00, 0xC2, 0x01, 0x00, 0, 0, 8])); } catch (e) {}
+  try { await dev.controlTransferOut({ requestType: "class", recipient: "interface", request: 0x22, value: 0x01, index: idx }); } catch (e) {}
+  let open = true;
+  (async () => {
+    while (open) {
+      try {
+        const r = await dev.transferIn(epIn, 64);
+        if (r.data && r.data.byteLength) onData(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
+      } catch (e) { if (open) { open = false; onClose(e); } }
+    }
+  })();
+  return {
+    kind: "USB",
+    write: (bytes) => dev.transferOut(epOut, bytes),
+    close: async () => { open = false; try { await dev.close(); } catch (e) {} },
+  };
+}
+
+async function openWebSerial(onData, onClose) {
+  const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x0483 }] });
+  await port.open({ baudRate: 115200 });
+  const writer = port.writable.getWriter();
+  let open = true, reader;
+  (async () => {
+    while (open && port.readable) {
+      reader = port.readable.getReader();
+      try {
+        while (true) { const { value, done } = await reader.read(); if (done) break; if (value) onData(value); }
+      } catch (e) { if (open) { open = false; onClose(e); } }
+      finally { reader.releaseLock(); }
+    }
+  })();
+  return {
+    kind: "Serial",
+    write: (bytes) => writer.write(bytes),
+    close: async () => { open = false; try { await reader?.cancel(); } catch (e) {} try { writer.releaseLock(); await port.close(); } catch (e) {} },
+  };
+}
+
+// ======================================================================
+// MSP v2 client
+// ======================================================================
+function crc8(bytes, from, to) {
+  let c = 0;
+  for (let i = from; i < to; i++) { c ^= bytes[i]; for (let k = 0; k < 8; k++) c = (c & 0x80) ? ((c << 1) ^ 0xD5) & 0xFF : (c << 1) & 0xFF; }
+  return c;
+}
+class MspClient {
+  constructor() { this.buf = new Uint8Array(0); this.pending = null; this.chain = Promise.resolve(); this.transport = null; }
+  feed(chunk) {
+    const n = new Uint8Array(this.buf.length + chunk.length); n.set(this.buf); n.set(chunk, this.buf.length); this.buf = n;
+    while (true) {
+      let s = -1;
+      for (let i = 0; i + 1 < this.buf.length; i++) if (this.buf[i] === 0x24 && this.buf[i + 1] === 0x58) { s = i; break; }
+      if (s < 0) { this.buf = this.buf.slice(Math.max(0, this.buf.length - 1)); return; }
+      if (this.buf.length < s + 8) { this.buf = this.buf.slice(s); return; }
+      const kind = this.buf[s + 2];
+      const cmd = this.buf[s + 4] | (this.buf[s + 5] << 8);
+      const len = this.buf[s + 6] | (this.buf[s + 7] << 8);
+      if (len > 4096) { this.buf = this.buf.slice(s + 2); continue; }
+      if (this.buf.length < s + 9 + len) { this.buf = this.buf.slice(s); return; }
+      const ok = crc8(this.buf, s + 3, s + 8 + len) === this.buf[s + 8 + len];
+      const payload = this.buf.slice(s + 8, s + 8 + len);
+      this.buf = this.buf.slice(s + 9 + len);
+      if (ok && this.pending && this.pending.cmd === cmd && (kind === 0x3E || kind === 0x21)) {
+        const p = this.pending; this.pending = null; clearTimeout(p.timer);
+        kind === 0x21 ? p.reject(new Error("The board refused that command.")) : p.resolve(payload);
+      }
+    }
+  }
+  request(cmd, payload = new Uint8Array(0), timeoutMs = 1500) {
+    const run = () => new Promise((resolve, reject) => {
+      if (!this.transport) return reject(new Error("Not connected."));
+      const f = new Uint8Array(9 + payload.length);
+      f.set([0x24, 0x58, 0x3C, 0, cmd & 0xFF, cmd >> 8, payload.length & 0xFF, payload.length >> 8]);
+      f.set(payload, 8);
+      f[f.length - 1] = crc8(f, 3, 8 + payload.length);
+      this.pending = { cmd, resolve, reject, timer: setTimeout(() => { this.pending = null; reject(new Error("The board did not answer.")); }, timeoutMs) };
+      Promise.resolve(this.transport.write(f)).catch((e) => { clearTimeout(this.pending?.timer); this.pending = null; reject(e); });
+    });
+    const p = this.chain.then(run, run);
+    this.chain = p.catch(() => {});
+    return p;
+  }
+}
+
+// ======================================================================
+// Demo device: runs the same cue maths as the firmware, driven by the drag
+// ======================================================================
+const deg = Math.PI / 180;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrap360 = (d) => ((d % 360) + 360) % 360;
+function mapRange(v, dead, full, curve) {
+  if (v <= dead) return 0;
+  if (full <= dead) return 1;
+  let m = clamp((v - dead) / (full - dead), 0, 1);
+  return Math.abs(curve - 1) > 1e-3 ? Math.pow(m, curve) : m;
+}
+function dirWeight(cueAz, motorAz, focus) {
+  const c = Math.cos((cueAz - motorAz) * deg);
+  if (c <= 0) return 0;
+  return Math.abs(focus - 1) > 1e-3 ? Math.pow(c, focus) : c;
+}
+const demo = { tilt: 0, az: 0, yaw: 0, yawAccum: 0, phases: {}, tickEnd: 0, tickAz: 90, testEnd: 0, testMask: 0, testInt: 0, last: performance.now() };
+function demoPattern(ch, m, dt, key) {
+  if (m <= 0) { demo.phases[key] = 0; return 0; }
+  const g = ch.gain / 100;
+  if (ch.pattern === 1) { demo.phases[key] = ((demo.phases[key] || 0) + Math.max(ch.pulseHz, 1) * dt) % 1; return demo.phases[key] < 0.5 ? m * g : 0; }
+  if (ch.pattern === 2) { const lo = Math.max(ch.pulseHz, 1), hi = Math.max(ch.pulseHzMax, lo); demo.phases[key] = ((demo.phases[key] || 0) + (lo + (hi - lo) * m) * dt) % 1; return demo.phases[key] < 0.5 ? g : 0; }
+  return m * g;
+}
+function chan(c, p) { return { enabled: c[p + ".enabled"], pattern: c[p + ".pattern"], gain: c[p + ".gain"], curve: c[p + ".curve"], deadband: c[p + ".deadband"], fullScale: c[p + ".fullScale"], pulseHz: c[p + ".pulseHz"], pulseHzMax: c[p + ".pulseHzMax"] }; }
+function demoStatus(c) {
+  const now = performance.now(), dt = clamp((now - demo.last) / 1000, 0.001, 0.1); demo.last = now;
+  const level = [0, 0, 0, 0], focus = Math.max(c.focus, 1) / 10;
+  const add = (amt, az) => { for (let i = 0; i < 4; i++) { const v = amt * dirWeight(az, c["az" + i], focus); level[i] = c.combine ? Math.max(level[i], v) : level[i] + v; } };
+  if (c.enabled) {
+    const tilt = chan(c, "tilt");
+    if (tilt.enabled) add(demoPattern(tilt, mapRange(demo.tilt * 10, tilt.deadband, tilt.fullScale, tilt.curve / 10), dt, "t"), c.tiltPolarity ? demo.az + 180 : demo.az);
+    const yr = chan(c, "yawRate");
+    if (yr.enabled) add(demoPattern(yr, mapRange(Math.abs(demo.yaw), yr.deadband, yr.fullScale, yr.curve / 10), dt, "y"), demo.yaw >= 0 ? 90 : 270);
+    if (c.yawTickEnabled) {
+      demo.yawAccum += demo.yaw * dt;
+      const step = c.yawTickStep / 10;
+      if (Math.abs(demo.yawAccum) >= step) { const r = demo.yawAccum > 0; demo.yawAccum -= r ? step : -step; demo.tickAz = r ? 90 : 270; demo.tickEnd = now + c.yawTickMs; }
+      if (now < demo.tickEnd) add(c.yawTickGain / 100, demo.tickAz);
+    }
+  }
+  for (let i = 0; i < 4; i++) level[i] = clamp(level[i], 0, 1) * (c.masterGain / 100) * (c["gain" + i] / 100);
+  const test = now < demo.testEnd;
+  if (test) for (let i = 0; i < 4; i++) level[i] = (demo.testMask & (1 << i)) ? demo.testInt / 100 : 0;
+  const lo = Math.min(c.minDuty, c.maxDuty) / 100, hi = Math.max(c.minDuty, c.maxDuty) / 100;
+  const motors = level.map((l) => (l < 0.04 ? 0 : Math.round((lo + (hi - lo) * clamp(l, 0, 1)) * 100)));
+  return { ready: true, acc: true, test, batteryLow: false, enabled: !!c.enabled, tilt: demo.tilt, leanAz: wrap360(demo.az),
+    leanF: Math.sin(demo.tilt * deg) * Math.cos(demo.az * deg), leanR: Math.sin(demo.tilt * deg) * Math.sin(demo.az * deg),
+    accH: 0, accAz: 0, accV: 0, yawRate: demo.yaw, yawSinceTick: demo.yawAccum, motors, vbat: 0 };
+}
+
+// ======================================================================
+// App state
+// ======================================================================
+const $ = (id) => document.getElementById(id);
+const state = { mode: "demo", cfg: defaultConfig(), status: null, dirty: false, tab: "live", info: null };
+const msp = new MspClient();
+let sendTimer = null, pollTimer = null;
+
+function toast(text, ms = 2200) {
+  const t = $("toast"); t.textContent = text; t.hidden = false;
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), ms);
+}
+function setDirty(d) {
+  state.dirty = d;
+  const b = $("saveBtn");
+  b.disabled = !d; b.textContent = d ? "Save to board" : "Saved";
+}
+function cfgChanged() {
+  setDirty(true);
+  renderAll();
+  if (state.mode !== "board") return;
+  clearTimeout(sendTimer);
+  sendTimer = setTimeout(() => msp.request(MSP.HAPTIC_SET_CONFIG, encodeConfig(state.cfg)).catch((e) => toast(e.message)), 150);
+}
+
+// ---- controls ---------------------------------------------------------
+const PATTERNS = [["Steady", 0], ["Pulsed", 1], ["Faster pulses", 2]];
+const CURVES = [["Gentle start", 20], ["Even", 10], ["Quick start", 5]];
+function segment(id, options, get, set) {
+  const el = $(id); el.innerHTML = "";
+  for (const [label, v] of options) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.dataset.v = v;
+    b.addEventListener("click", () => { set(v); cfgChanged(); });
+    el.appendChild(b);
+  }
+  el._sync = () => { for (const b of el.children) b.setAttribute("aria-pressed", String(Number(b.dataset.v) === get())); };
+}
+function slider(id, toUi, fromUi, fmt, key) {
+  const el = $(id), out = $(id + "-v");
+  el.addEventListener("input", () => { fromUi(Number(el.value)); out.textContent = fmt(Number(el.value)); cfgChanged(); });
+  el._sync = () => { const v = toUi(state.cfg[key]); el.value = v; out.textContent = fmt(v); };
+}
+function toggle(id, key, bit) {
+  const el = $(id);
+  el.addEventListener("change", () => {
+    if (bit) state.cfg.flags = el.checked ? (state.cfg.flags | bit) : (state.cfg.flags & ~bit);
+    else state.cfg[key] = el.checked ? 1 : 0;
+    cfgChanged();
+  });
+  el._sync = () => { el.checked = bit ? !!(state.cfg.flags & bit) : !!state.cfg[key]; };
+}
+const synced = [];
+function bind(el) { synced.push(el); }
+
+function bindChannel(prefix, key, unit) {
+  // unit: { scale: config units per UI unit, fmt }
+  const k = (n) => key + "." + n;
+  bind($(prefix + "-enabled")); toggle(prefix + "-enabled", k("enabled"));
+  slider(prefix + "-dead", (v) => v / unit.scale, (v) => (state.cfg[k("deadband")] = Math.round(v * unit.scale)), unit.fmt, k("deadband")); bind($(prefix + "-dead"));
+  slider(prefix + "-full", (v) => v / unit.scale, (v) => (state.cfg[k("fullScale")] = Math.round(v * unit.scale)), unit.fmt, k("fullScale")); bind($(prefix + "-full"));
+  slider(prefix + "-gain", (v) => v, (v) => (state.cfg[k("gain")] = v), (v) => v + " %", k("gain")); bind($(prefix + "-gain"));
+  slider(prefix + "-hz", (v) => v, (v) => (state.cfg[k("pulseHz")] = v), (v) => v + " Hz", k("pulseHz")); bind($(prefix + "-hz"));
+  slider(prefix + "-hzmax", (v) => v, (v) => (state.cfg[k("pulseHzMax")] = v), (v) => v + " Hz", k("pulseHzMax")); bind($(prefix + "-hzmax"));
+  segment(prefix + "-pattern", PATTERNS, () => state.cfg[k("pattern")], (v) => (state.cfg[k("pattern")] = v)); bind($(prefix + "-pattern"));
+  segment(prefix + "-curve", CURVES, () => state.cfg[k("curve")], (v) => (state.cfg[k("curve")] = v)); bind($(prefix + "-curve"));
+  const card = $(prefix + "-enabled").closest(".card");
+  synced.push({ _sync: () => {
+    card.classList.toggle("off", !state.cfg[k("enabled")]);
+    const p = state.cfg[k("pattern")];
+    $(prefix + "-hz-row").hidden = p === 0;
+    $(prefix + "-hzmax-row").hidden = p !== 2;
+    $(prefix + "-hz").previousElementSibling.previousElementSibling.textContent = p === 2 ? "Pulse rate at start" : "Pulse rate";
+  } });
+}
+bindChannel("tilt", "tilt", { scale: 10, fmt: (v) => v.toFixed(1) + "°" });
+bindChannel("accel", "accel", { scale: 1000, fmt: (v) => v.toFixed(2) + " g" });
+bindChannel("yaw", "yawRate", { scale: 1, fmt: (v) => v + "°/s" });
+segment("tilt-pol", [["Side I lean toward", 0], ["Opposite side", 1]], () => state.cfg.tiltPolarity, (v) => (state.cfg.tiltPolarity = v)); bind($("tilt-pol"));
+segment("accel-pol", [["Direction of push", 0], ["Opposite side", 1]], () => state.cfg.accelPolarity, (v) => (state.cfg.accelPolarity = v)); bind($("accel-pol"));
+slider("accel-lpf", (v) => v, (v) => (state.cfg.accelLpfHz = v), (v) => v <= 3 ? v + " Hz (smooth)" : v >= 15 ? v + " Hz (quick)" : v + " Hz", "accelLpfHz"); bind($("accel-lpf"));
+toggle("accel-vert", "accelVertical"); bind($("accel-vert"));
+toggle("tick-enabled", "yawTickEnabled"); bind($("tick-enabled"));
+slider("tick-step", (v) => v / 10, (v) => (state.cfg.yawTickStep = Math.round(v * 10)), (v) => v + "°", "yawTickStep"); bind($("tick-step"));
+slider("tick-ms", (v) => v, (v) => (state.cfg.yawTickMs = v), (v) => v + " ms", "yawTickMs"); bind($("tick-ms"));
+slider("tick-gain", (v) => v, (v) => (state.cfg.yawTickGain = v), (v) => v + " %", "yawTickGain"); bind($("tick-gain"));
+synced.push({ _sync: () => $("card-tick").classList.toggle("off", !state.cfg.yawTickEnabled) });
+
+slider("masterGain", (v) => v, (v) => (state.cfg.masterGain = v), (v) => v + " %", "masterGain"); bind($("masterGain"));
+slider("minDuty", (v) => v, (v) => (state.cfg.minDuty = v), (v) => v + " %", "minDuty"); bind($("minDuty"));
+slider("maxDuty", (v) => v, (v) => (state.cfg.maxDuty = v), (v) => v + " %", "maxDuty"); bind($("maxDuty"));
+slider("focus", (v) => v / 10, (v) => (state.cfg.focus = Math.round(v * 10)), (v) => v.toFixed(1) + "×", "focus"); bind($("focus"));
+segment("combine", [["Add together", 0], ["Strongest wins", 1]], () => state.cfg.combine, (v) => (state.cfg.combine = v)); bind($("combine"));
+toggle("enabled", "enabled"); bind($("enabled"));
+toggle("mirror", "mirror"); bind($("mirror"));
+toggle("startupBuzz", null, 1); bind($("startupBuzz"));
+toggle("batteryAlert", null, 2); bind($("batteryAlert"));
+for (const id of ["fwdAxis", "neutralMode"]) {
+  const key = id === "fwdAxis" ? "forwardAxis" : "neutralMode";
+  $(id).addEventListener("change", () => { state.cfg[key] = Number($(id).value); cfgChanged(); });
+  bind({ _sync: () => ($(id).value = String(state.cfg[key])) });
+}
+
+// motor rows
+const POSITIONS = [["Front", 0], ["Front right", 45], ["Right", 90], ["Back right", 135], ["Back", 180], ["Back left", 225], ["Left", 270], ["Front left", 315]];
+(function buildMotorRows() {
+  const host = $("motorRows");
+  for (let i = 0; i < 4; i++) {
+    const row = document.createElement("div"); row.className = "motor-row";
+    row.innerHTML = `<span class="tag" aria-hidden="true">M${i + 1}</span>
+      <label class="sr" style="position:absolute;left:-9999px" for="pos${i}">Motor ${i + 1} position</label>
+      <select id="pos${i}"></select>
+      <button class="btn small" type="button" id="buzz${i}">Buzz</button>
+      <div class="trim"><input type="range" id="trim${i}" min="0" max="100" step="1" aria-label="Motor ${i + 1} strength"><span class="val" id="trim${i}-v"></span></div>`;
+    host.appendChild(row);
+    const sel = row.querySelector("select");
+    for (const [n, a] of POSITIONS) { const o = document.createElement("option"); o.value = a; o.textContent = n; sel.appendChild(o); }
+    const custom = document.createElement("option"); custom.value = "custom"; custom.textContent = "Other angle"; sel.appendChild(custom);
+    sel.addEventListener("change", () => {
+      if (sel.value === "custom") return;
+      state.cfg["az" + i] = Number(sel.value); cfgChanged();
+    });
+    bind({ _sync: () => {
+      const a = wrap360(state.cfg["az" + i]);
+      const known = POSITIONS.find(([, v]) => v === a);
+      custom.textContent = known ? "Other angle" : `${a}°`;
+      sel.value = known ? String(a) : "custom";
+    } });
+    slider("trim" + i, (v) => v, (v) => (state.cfg["gain" + i] = v), (v) => v + " %", "gain" + i); bind($("trim" + i));
+    $("buzz" + i).addEventListener("click", () => testMotors(1 << i, 70, 500));
+  }
+})();
+
+// ---- live view --------------------------------------------------------
+const R_SCALE = 72;   // px radius of the "full strength" tilt ring
+function polar(r, az) { return [150 + r * Math.sin(az * deg), 150 - r * Math.cos(az * deg)]; }
+function arcPath(r, a0, a1) {
+  if (Math.abs(a1 - a0) < 0.5) return "";
+  const [x0, y0] = polar(r, a0), [x1, y1] = polar(r, a1);
+  const large = Math.abs(a1 - a0) > 180 ? 1 : 0, sweep = a1 > a0 ? 1 : 0;
+  return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${large} ${sweep} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+}
+const NS = "http://www.w3.org/2000/svg";
+const motorEls = [];
+(function buildMotorNodes() {
+  const g = $("motorNodes");
+  for (let i = 0; i < 4; i++) {
+    const grp = document.createElementNS(NS, "g");
+    const ring = document.createElementNS(NS, "circle"); ring.setAttribute("r", "18"); ring.setAttribute("fill", "none"); ring.setAttribute("stroke", "var(--buzz)"); ring.setAttribute("stroke-width", "3"); ring.style.setProperty("--r0", "18px"); ring.style.setProperty("--r1", "30px");
+    const base = document.createElementNS(NS, "circle"); base.setAttribute("r", "18"); base.setAttribute("fill", "var(--surface)"); base.setAttribute("stroke", "var(--line)");
+    const fill = document.createElementNS(NS, "circle"); fill.setAttribute("r", "18"); fill.setAttribute("fill", "var(--buzz)");
+    const t = document.createElementNS(NS, "text"); t.setAttribute("text-anchor", "middle"); t.setAttribute("dy", "4"); t.setAttribute("font-size", "12"); t.setAttribute("fill", "var(--ink)"); t.setAttribute("font-family", "var(--font-data)");
+    grp.append(ring, base, fill, t); g.appendChild(grp);
+    motorEls.push({ grp, ring, fill, t });
+  }
+})();
+const DIRS = ["front", "front-right", "right", "back-right", "back", "back-left", "left", "front-left"];
+function dirName(az) { return DIRS[Math.round(wrap360(az) / 45) % 8]; }
+
+function renderLive() {
+  const s = state.status, c = state.cfg;
+  const fullDeg = Math.max(c["tilt.fullScale"] / 10, 0.5);
+  $("ringDead").setAttribute("r", String(clamp((c["tilt.deadband"] / 10) / fullDeg * R_SCALE, 2, 88)));
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = polar(126, c["az" + i]);
+    const m = motorEls[i], pct = s ? s.motors[i] : 0;
+    m.grp.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+    m.fill.setAttribute("opacity", pct ? String(0.25 + 0.75 * pct / 100) : "0");
+    m.t.textContent = pct ? pct + "%" : "M" + (i + 1);
+    m.ring.classList.toggle("pulse", pct > 0);
+    m.ring.setAttribute("opacity", pct ? "1" : "0");
+  }
+  if (!s) return;
+  const r = clamp(s.tilt / fullDeg, 0, 1.2) * R_SCALE;
+  const [lx, ly] = polar(r, s.leanAz);
+  $("leanDot").setAttribute("cx", lx.toFixed(1)); $("leanDot").setAttribute("cy", ly.toFixed(1));
+  const accFull = Math.max(c["accel.fullScale"] / 1000, 0.05);
+  const [ax, ay] = polar(clamp(s.accH / accFull, 0, 1.1) * R_SCALE, s.accAz);
+  $("accArrow").setAttribute("x2", ax.toFixed(1)); $("accArrow").setAttribute("y2", ay.toFixed(1));
+  const yawSpan = clamp(s.yawRate / Math.max(c["yawRate.fullScale"], 10), -1, 1) * 80;
+  $("yawArc").setAttribute("d", s.yawRate >= 0 ? arcPath(100, 0, yawSpan) : arcPath(100, yawSpan, 0));
+  const step = c.yawTickStep / 10, prog = clamp(s.yawSinceTick / step, -1, 1) * 60;
+  $("tickArc").setAttribute("d", prog >= 0 ? arcPath(100, 180 - prog, 180) : arcPath(100, 180, 180 - prog));
+
+  $("rTilt").innerHTML = `${s.tilt.toFixed(1)}<small>°</small>`;
+  $("rDir").textContent = s.tilt >= 0.5 ? dirName(s.leanAz) : "—";
+  $("rAcc").innerHTML = `${s.accH.toFixed(2)}<small> g</small>`;
+  $("rYaw").innerHTML = `${Math.round(s.yawRate)}<small>°/s</small>`;
+  $("stateText").textContent = state.mode === "demo" ? "Demo" : !s.ready ? "Calibrating: keep still" : !s.enabled ? "Feedback off" : s.test ? "Testing motors" : "Running";
+  if (state.mode === "board") {
+    const bp = $("battPill");
+    bp.hidden = !(s.vbat > 0.5);
+    bp.classList.toggle("warn", s.batteryLow);
+    $("battText").textContent = s.vbat.toFixed(2) + " V" + (s.batteryLow ? " low" : "");
+  }
+}
+function renderAll() { for (const el of synced) el._sync && el._sync(); renderLive(); }
+
+// ---- tabs ---------------------------------------------------------------
+function showTab(tab) {
+  state.tab = tab;
+  for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  $("liveView").hidden = false;   // live view stays on top of every tab: the user feels changes while tuning
+  $("liveView").classList.toggle("compact", tab !== "live");
+  for (const t of ["cues", "setup", "device"]) $("tab-" + t).hidden = tab !== t;
+  try { localStorage.setItem("bh-tab", tab); } catch (e) {}
+  window.scrollTo({ top: 0 });
+}
+for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => showTab(b.dataset.tab));
+
+// ---- demo interaction ---------------------------------------------------
+(function demoDrag() {
+  const svg = $("head"); let dragging = false;
+  const setFromEvent = (e) => {
+    const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    const q = p.matrixTransform(svg.getScreenCTM().inverse());
+    const dx = q.x - 150, dy = 150 - q.y, dist = Math.hypot(dx, dy);
+    const fullDeg = Math.max(state.cfg["tilt.fullScale"] / 10, 0.5);
+    demo.tilt = clamp(dist / R_SCALE, 0, 1.2) * fullDeg;
+    demo.az = wrap360(Math.atan2(dx, dy) / deg);
+  };
+  svg.addEventListener("pointerdown", (e) => { if (state.mode !== "demo") return; dragging = true; svg.setPointerCapture(e.pointerId); setFromEvent(e); });
+  svg.addEventListener("pointermove", (e) => { if (dragging) setFromEvent(e); });
+  const end = () => { dragging = false; };
+  svg.addEventListener("pointerup", end); svg.addEventListener("pointercancel", end);
+  const hold = (id, rate) => {
+    const b = $(id);
+    const on = (e) => { e.preventDefault(); demo.yaw = rate; };
+    const off = () => { demo.yaw = 0; };
+    b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off); b.addEventListener("pointerleave", off); b.addEventListener("pointercancel", off);
+  };
+  hold("turnLeft", -90); hold("turnRight", 90);
+})();
+
+// ---- polling --------------------------------------------------------------
+function startPolling() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (state.mode === "demo") { state.status = demoStatus(state.cfg); renderLive(); return; }
+    try { state.status = decodeStatus(await msp.request(MSP.HAPTIC_STATUS)); renderLive(); }
+    catch (e) { /* a missed poll is fine; disconnects are handled by the transport */ }
+  }, 80);
+}
+
+// ---- connect -------------------------------------------------------------
+function connectError(text) { const m = $("connectMsg"); m.textContent = text; m.hidden = !text; }
+async function connect() {
+  connectError("");
+  const android = /Android/i.test(navigator.userAgent);
+  const useUsb = !!navigator.usb && (android || !navigator.serial);
+  if (!navigator.usb && !navigator.serial) {
+    connectError("This browser can't reach USB devices. Use Chrome on an Android phone, or Chrome or Edge on a computer. iPhones and iPads don't allow it.");
+    return;
+  }
+  let transport;
+  try {
+    const onClose = () => { if (state.mode === "board") { toast("Board disconnected"); goDemo(); } };
+    transport = useUsb ? await openWebUsb((d) => msp.feed(d), onClose) : await openWebSerial((d) => msp.feed(d), onClose);
+  } catch (e) {
+    if (e && e.name === "NotFoundError") return;   // user closed the picker
+    if (e && e.name === "SecurityError") connectError("USB is blocked on this page. Open the app from its own web address (see the setup guide) and try again.");
+    else connectError((e && e.message) || "Couldn't open the board.");
+    return;
+  }
+  msp.transport = transport;
+  try {
+    const info = await msp.request(MSP.HAPTIC_INFO, undefined, 2500);
+    if (info[0] !== 1) throw new Error("The board's haptic firmware is a newer version than this app understands. Update the app.");
+    const cfg = decodeConfig(await msp.request(MSP.HAPTIC_CONFIG));
+    let fw = "";
+    try { const v = await msp.request(MSP.FC_VERSION); fw = `${v[0]}.${v[1]}.${v[2]}`; } catch (e) {}
+    let board = "";
+    try { const b = await msp.request(MSP.BOARD_INFO); board = new TextDecoder().decode(b.slice(0, 4)); } catch (e) {}
+    state.mode = "board"; state.cfg = cfg; state.info = { api: `${info[0]}.${info[1]}`, motors: info[2], acc: !!info[3], fw, board, link: transport.kind };
+    setDirty(false);
+    $("connPill").className = "pill live"; $("connText").textContent = "Connected";
+    $("connectBanner").hidden = true; $("demoTurn").hidden = true; $("dragHint").hidden = true; $("disconnectBtn").hidden = false;
+    if (!info[3]) toast("The board reports no accelerometer: tilt and acceleration cues can't run.", 5000);
+    renderInfo(); renderAll();
+  } catch (e) {
+    msp.transport = null; await transport.close();
+    connectError(e.message === "The board did not answer." ? "The board didn't answer. Check it is running the haptic firmware, then unplug and retry." : e.message);
+  }
+}
+function goDemo() {
+  const t = msp.transport; msp.transport = null; if (t) t.close();
+  state.mode = "demo"; state.info = null;
+  $("connPill").className = "pill demo"; $("connText").textContent = "Demo";
+  $("battPill").hidden = true;
+  $("connectBanner").hidden = false; $("demoTurn").hidden = false; $("dragHint").hidden = false; $("disconnectBtn").hidden = true;
+  renderInfo(); renderAll();
+}
+function renderInfo() {
+  const i = state.info, dl = $("boardInfo");
+  const rows = i ? [["Connection", i.link], ["Board", i.board || "—"], ["Betaflight", i.fw || "—"], ["Haptic API", i.api], ["Motors", String(i.motors)], ["Accelerometer", i.acc ? "Found" : "Missing"]]
+                 : [["Status", "Demo mode, no board connected"]];
+  dl.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+}
+$("connectBtn").addEventListener("click", connect);
+$("disconnectBtn").addEventListener("click", () => { goDemo(); toast("Disconnected"); });
+
+// ---- actions ---------------------------------------------------------------
+async function testMotors(mask, intensity, ms) {
+  if (state.mode === "demo") { demo.testMask = mask; demo.testInt = intensity; demo.testEnd = performance.now() + ms; return; }
+  const p = new Uint8Array([mask, intensity, ms & 0xFF, ms >> 8]);
+  try { await msp.request(MSP.HAPTIC_TEST, p); } catch (e) { toast(e.message); }
+}
+$("saveBtn").addEventListener("click", async () => {
+  if (state.mode === "demo") { setDirty(false); toast("Demo settings kept in this app only"); return; }
+  try {
+    clearTimeout(sendTimer);
+    await msp.request(MSP.HAPTIC_SET_CONFIG, encodeConfig(state.cfg));
+    await msp.request(MSP.EEPROM_WRITE, undefined, 4000);
+    setDirty(false); toast("Saved to the board");
+  } catch (e) { toast("Not saved: " + e.message); }
+});
+$("setNeutralBtn").addEventListener("click", async () => {
+  if (state.mode === "demo") { demo.tilt = 0; toast("Neutral set (demo)"); return; }
+  try {
+    await msp.request(MSP.HAPTIC_SET_NEUTRAL);
+    state.cfg = decodeConfig(await msp.request(MSP.HAPTIC_CONFIG));
+    setDirty(true); renderAll(); toast("Neutral set. Save to keep it.");
+  } catch (e) { toast("Couldn't set neutral: " + e.message); }
+});
+$("accCalBtn").addEventListener("click", async () => {
+  if (state.mode === "demo") { toast("Connect a board to calibrate"); return; }
+  try { await msp.request(MSP.ACC_CALIBRATION); toast("Calibrating, keep the board still for 2 seconds", 3000); }
+  catch (e) { toast(e.message); }
+});
+
+// backup
+function refreshBackup() {
+  const out = {}; for (const [n] of FIELDS) out[n] = state.cfg[n];
+  $("backup").value = JSON.stringify({ app: "balance-haptics", version: 1, settings: out }, null, 1);
+}
+$("copyBtn").addEventListener("click", async () => {
+  refreshBackup();
+  try { await navigator.clipboard.writeText($("backup").value); toast("Settings copied"); }
+  catch (e) { $("backup").select(); toast("Select all and copy the text"); }
+});
+$("loadBtn").addEventListener("click", () => {
+  try {
+    const j = JSON.parse($("backup").value);
+    const s = j.settings || j;
+    const next = { ...state.cfg };
+    for (const [n] of FIELDS) if (typeof s[n] === "number") next[n] = s[n];
+    state.cfg = next; cfgChanged(); toast("Settings loaded. Save to keep them on the board.");
+  } catch (e) { toast("That text isn't a settings backup."); }
+});
+document.querySelector('[data-tab="device"]').addEventListener("click", refreshBackup);
+
+// ---- start ---------------------------------------------------------------
+if (!navigator.usb && !navigator.serial) {
+  $("connectNote").textContent = "This browser can't reach USB devices, so it can only run the demo. Use Chrome on an Android phone, or Chrome or Edge on a computer.";
+}
+renderInfo();
+renderAll();
+let startTab = "live"; try { startTab = localStorage.getItem("bh-tab") || "live"; } catch (e) {}
+showTab(startTab);
+demo.tilt = 9; demo.az = 60;   // sample lean so the demo opens showing a cue
+startPolling();
+</script>
